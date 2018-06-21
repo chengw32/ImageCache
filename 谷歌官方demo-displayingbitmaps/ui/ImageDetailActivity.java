@@ -35,15 +35,15 @@ import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.Toast;
 
-import com.example.android.displayingbitmaps.BuildConfig;
-import com.example.android.displayingbitmaps.R;
-import com.example.android.displayingbitmaps.provider.Images;
-import com.example.android.displayingbitmaps.util.ImageCache;
-import com.example.android.displayingbitmaps.util.ImageResizer;
-import com.example.android.displayingbitmaps.util.Utils;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import cgw.com.displayingbitmaps.provider.Images;
+import cgw.com.displayingbitmaps.util.ImageCache;
+import cgw.com.displayingbitmaps.util.ImageResizer;
+import cgw.com.displayingbitmaps.util.Utils;
+import cgw.com.imagecache.R;
 
 public class ImageDetailActivity extends AppCompatActivity implements OnClickListener {
     private static final boolean D = true;
