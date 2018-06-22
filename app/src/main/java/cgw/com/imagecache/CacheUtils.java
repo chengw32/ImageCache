@@ -19,9 +19,12 @@ import java.lang.ref.Reference;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Set;
 
 import cgw.com.diskUtils.DiskLruCache;
@@ -60,13 +63,12 @@ public class CacheUtils {
                 Log.e("-----", "从硬盘获取");
             }
         } else {
-            Log.e("-----", "从内存获取");
         }
 
     }
 
 
-    private Set<WeakReference<Bitmap>> secondCachePool;
+    private List<Bitmap> secondCachePool;
     private ReferenceQueue recycleQueue;
 
     /**
@@ -76,12 +78,15 @@ public class CacheUtils {
      */
     private void addSecondCache(Bitmap bitmap) {
         initSecondCacheIns();
-        secondCachePool.add(new WeakReference<Bitmap>(bitmap, getQueue()));
+//        Log.e("---", " 放入二级缓存");
+        secondCachePool.add(bitmap);
+//        Log.e("---"," 二级缓存池大小 "+secondCachePool.size());
     }
 
     private void initSecondCacheIns() {
         if (null == secondCachePool)
-            secondCachePool = Collections.synchronizedSet(new HashSet<WeakReference<Bitmap>>());
+//            secondCachePool = Collections.synchronizedList(new LinkedList<Bitmap>());
+            secondCachePool = new ArrayList();
     }
 
 
@@ -96,22 +101,27 @@ public class CacheUtils {
                     while (true) {
 
                         //通过 poll
-//                            Reference<Bitmap> poll = recycleQueue.poll();
+//                        Reference<Bitmap> poll = recycleQueue.poll();
+//                        if (null != poll) {
+//
 //                            Bitmap bitmap = poll.get();
-//                            if (null != bitmap && !bitmap.isRecycled())bitmap.recycle();
+//                            if (null != bitmap)
+//                                Log.e("---", "被回收了");
+//                        }
+////                            if (null != bitmap && !bitmap.isRecycled())bitmap.recycle();
 //
 
                         //通过 remove
-                        try {
-                            Reference<Bitmap> reference = recycleQueue.remove();
-                            Bitmap bitmap = reference.get();
-                            if (null != bitmap && !bitmap.isRecycled()) {
-                                bitmap.recycle();
-                                Log.e("cache", "被回收了");
-                            }
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
+//                        try {
+//                            Reference<Bitmap> reference = recycleQueue.remove();
+//                            Bitmap bitmap = reference.get();
+//                            if (null != bitmap && !bitmap.isRecycled()) {
+//                                bitmap.recycle();
+//                                Log.e("---", "被回收了");
+//                            }
+//                        } catch (InterruptedException e) {
+//                            e.printStackTrace();
+//                        }
 
                     }
                 }
@@ -128,24 +138,30 @@ public class CacheUtils {
      * Time 2018/6/21 15:58
      * Des 放入二级缓存
      */
-    private void putToMemoryCache(String url, Bitmap bitmap) {
-       initMemoryCache();
-        memoryCache.put(url, bitmap);
+    public void putToMemoryCache(String url, Bitmap bitmap) {
+        initMemoryCache();
+        initSecondCacheIns();
+        secondCachePool.add(bitmap);
+        Log.e("---", " 二级缓存池大小 " + secondCachePool.size());
+//        memoryCache.put(url, bitmap);
     }
 
-    private void initMemoryCache(){
+    private void initMemoryCache() {
         if (null == memoryCache) {
             ActivityManager manager = (ActivityManager) MyApp.getIns().getSystemService(ACTIVITY_SERVICE);
             // 系统分配给应用的最大空间
             //单位是 M
             int memoryClass = manager.getMemoryClass();
             //设置缓存为最大空间的 1/8 转换成字节
-            memoryCache = new LruCache<String, Bitmap>(memoryClass / 8 * 1024 * 1024) {
+//            memoryCache = new LruCache<String, Bitmap>(memoryClass / 8 * 1024 * 1024) {
+            memoryCache = new LruCache<String, Bitmap>(10) {
 
                 @Override
                 protected void entryRemoved(boolean evicted, String key, Bitmap oldValue, Bitmap newValue) {
 
                     //加入二级缓存
+                    Log.e("---", "oldb  " + oldValue);
+                    Log.e("---", "key  " + key);
                     addSecondCache(oldValue);
                 }
             };
@@ -190,19 +206,23 @@ public class CacheUtils {
                         !isExternalStorageRemovable() ? getExternalCacheDir(MyApp.getIns()).getPath() :
                         MyApp.getIns().getCacheDir().getPath();
 
-        return new File(cachePath + File.separator + "chen");
+        File file = new File(Environment.getExternalStorageDirectory() + "/imageCache");
+        if (!file.exists()) file.mkdirs();
+        return file;
+//        return new File(cachePath + File.separator + "chen");
     }
 
-    private void initDiskCache(){
+    private void initDiskCache() {
         if (null == diskLruCache) {
             try {
                 diskLruCache = DiskLruCache.open(getDiskCacheDir(),
-                        BuildConfig.VERSION_CODE, 1, 10 * 1024 * 1024);
+                        BuildConfig.VERSION_CODE, 1, 1000 * 1024 * 1024);
             } catch (IOException e) {
                 e.printStackTrace();
             }
         }
     }
+
     /**
      * Author 陈
      * Time 2018/6/21 17:50
@@ -211,14 +231,16 @@ public class CacheUtils {
     public void putToDiskCache(String url, Bitmap bitmap) {
 
         initDiskCache();
+        DiskLruCache.Snapshot snapshot = null;
+        OutputStream outputStream = null;
         try {
-            DiskLruCache.Snapshot snapshot = diskLruCache.get(url);
+            snapshot = diskLruCache.get(url);
             if (null == snapshot) {
 
                 DiskLruCache.Editor edit = diskLruCache.edit(url);
                 if (null != edit) {
                     //deit 打开输出流
-                    OutputStream outputStream = edit.newOutputStream(0);
+                    outputStream = edit.newOutputStream(0);
                     // 将 bitmap compress压缩 然后通过输出流 写到 edit
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream);
                     //edit 提交缓存
@@ -228,19 +250,33 @@ public class CacheUtils {
 
         } catch (IOException e) {
             e.printStackTrace();
+        } finally {
+            if (null != snapshot) {
+                snapshot.close();
+            }
+            if (null != outputStream) {
+                try {
+                    outputStream.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
         }
 
 
     }
 
     public Bitmap getDiskCache(String url) {
-
-
+        Log.e("-----", "getDiskCache  ");
         initDiskCache();
         DiskLruCache.Snapshot snapshot = null;
         try {
             snapshot = diskLruCache.get(url);
-            if (null == snapshot) return null;
+
+            if (null == snapshot) {
+                Log.e("-----", "snapshot 为空  ");
+                return null;
+            }
             //获得文件输入流 读取bitmap
             InputStream is = snapshot.getInputStream(0);
 
@@ -252,12 +288,16 @@ public class CacheUtils {
             BitmapFactory.decodeStream(is, null, options);
             addInBitmapOptions(options);
 
-            Log.e("-----","inBitmap是否为空  "+ options.inBitmap);
+            Log.e("-----", "inBitmap是否为空  " + options.inBitmap);
             // 真正的解析图片  如果 inBitmap 里有 对象 在 decodeStrieam 的时候就会去复用 而不用重新分配内存
             options.inJustDecodeBounds = false;
             Bitmap bitmap = BitmapFactory.decodeStream(is, null, options);
             //放入内存缓存
-            if (null != bitmap) memoryCache.put(url, bitmap);
+            if (null != bitmap) {
+                Log.e("-----", "加入 secondCachePool  " );
+                secondCachePool.add(bitmap);
+                memoryCache.put(url, bitmap);
+            }
             return bitmap;
         } catch (IOException e) {
             e.printStackTrace();
@@ -281,27 +321,26 @@ public class CacheUtils {
         //BEGIN_INCLUDE(add_bitmap_options)
         // inBitmap only works with mutable bitmaps so force the decoder to
         // return mutable bitmaps.
-        options.inMutable = false;
+        options.inMutable = true;
         options.inSampleSize = 1;
 
 
         initSecondCacheIns();
-        Iterator<WeakReference<Bitmap>> iterator = secondCachePool.iterator();
+        Iterator<Bitmap> iterator = secondCachePool.iterator();
         synchronized (secondCachePool) {
 
             while (iterator.hasNext()) {
-                Bitmap bitmap = iterator.next().get();
-                if (null != bitmap && bitmap.isMutable()) {
-
+                Bitmap bitmap = iterator.next();
+                if (null != bitmap) {
+                    Log.e("----"," isMutable");
                     if (canUseForInBitmap(bitmap, options)) {
                         //内存可以复用 所以将 bitmap 赋值到 inBitmap
+                        Log.e("----"," 二级缓存赋值到 inbitmap 前  二级缓存大小 "+secondCachePool.size());
                         options.inBitmap = bitmap;
+                        Log.e("----"," 二级缓存赋值到 inbitmap 后  二级缓存大小 "+secondCachePool.size());
                         //然后从 容器中移除
-                        iterator.remove();
+//                        iterator.remove();
                     }
-                } else {
-                    //如果二级缓存里的 bitmap 为空或者不可复用 则直接移除掉
-                    iterator.remove();
                 }
             }
         }
@@ -363,6 +402,7 @@ public class CacheUtils {
     public Bitmap getFromNet(String url) {
 
         Bitmap bitmap = BitmapFactory.decodeResource(MyApp.getIns().getResources(), R.mipmap.banner);
+
         if (null != bitmap) {
 
             Log.e("-----", "从网络获取");
