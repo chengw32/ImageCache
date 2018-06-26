@@ -5,6 +5,7 @@ import android.app.ActivityManager;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.drawable.BitmapDrawable;
 import android.os.Build;
 import android.os.Environment;
 import android.util.Log;
@@ -12,6 +13,8 @@ import android.util.LruCache;
 import android.widget.TabHost;
 
 import java.io.File;
+import java.io.FileDescriptor;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -53,22 +56,26 @@ public class CacheUtils {
 
     public void getBitmap(String url) {
 
+        //内存中获取缓存
         Bitmap memoryCache = getMemoryCache(url);
         if (null == memoryCache) {
+            //硬盘中获取缓存
             Bitmap diskCache = getDiskCache(url);
             if (null == diskCache) {
 
+                //从网络或者sd卡获取源图片
                 getFromNet(url);
             } else {
-                Log.e("-----", "从硬盘获取");
+                Log.e("-----", "从硬盘缓存获取");
             }
         } else {
+            Log.e("-----", "从内存缓存获取");
         }
 
     }
 
 
-    private List<Bitmap> secondCachePool;
+    private Set<WeakReference<Bitmap>> secondCachePool;
     private ReferenceQueue recycleQueue;
 
     /**
@@ -78,15 +85,13 @@ public class CacheUtils {
      */
     private void addSecondCache(Bitmap bitmap) {
         initSecondCacheIns();
-//        Log.e("---", " 放入二级缓存");
-        secondCachePool.add(bitmap);
-//        Log.e("---"," 二级缓存池大小 "+secondCachePool.size());
+        Log.e("---", " 放入二级缓存");
+        secondCachePool.add(new WeakReference(bitmap, getQueue()));
     }
 
     private void initSecondCacheIns() {
         if (null == secondCachePool)
-//            secondCachePool = Collections.synchronizedList(new LinkedList<Bitmap>());
-            secondCachePool = new ArrayList();
+            secondCachePool = Collections.synchronizedSet(new HashSet<WeakReference<Bitmap>>());
     }
 
 
@@ -99,30 +104,17 @@ public class CacheUtils {
                 @Override
                 public void run() {
                     while (true) {
-
-                        //通过 poll
-//                        Reference<Bitmap> poll = recycleQueue.poll();
-//                        if (null != poll) {
-//
-//                            Bitmap bitmap = poll.get();
-//                            if (null != bitmap)
-//                                Log.e("---", "被回收了");
-//                        }
-////                            if (null != bitmap && !bitmap.isRecycled())bitmap.recycle();
-//
-
-                        //通过 remove
-//                        try {
-//                            Reference<Bitmap> reference = recycleQueue.remove();
-//                            Bitmap bitmap = reference.get();
-//                            if (null != bitmap && !bitmap.isRecycled()) {
-//                                bitmap.recycle();
-//                                Log.e("---", "被回收了");
-//                            }
-//                        } catch (InterruptedException e) {
-//                            e.printStackTrace();
-//                        }
-
+                        //通过 remove  因为 remove 是一个阻塞的 没有的话不会执行
+                        try {
+                            Reference<Bitmap> reference = recycleQueue.remove();
+                            Bitmap bitmap = reference.get();
+                            if (null != bitmap && !bitmap.isRecycled()) {
+                                bitmap.recycle();
+                                Log.e("---", "被回收了");
+                            }
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
                     }
                 }
             });
@@ -140,10 +132,7 @@ public class CacheUtils {
      */
     public void putToMemoryCache(String url, Bitmap bitmap) {
         initMemoryCache();
-        initSecondCacheIns();
-        secondCachePool.add(bitmap);
-        Log.e("---", " 二级缓存池大小 " + secondCachePool.size());
-//        memoryCache.put(url, bitmap);
+        memoryCache.put(url, bitmap);
     }
 
     private void initMemoryCache() {
@@ -153,19 +142,38 @@ public class CacheUtils {
             //单位是 M
             int memoryClass = manager.getMemoryClass();
             //设置缓存为最大空间的 1/8 转换成字节
-//            memoryCache = new LruCache<String, Bitmap>(memoryClass / 8 * 1024 * 1024) {
-            memoryCache = new LruCache<String, Bitmap>(10) {
+            memoryCache = new LruCache<String, Bitmap>(memoryClass / 8 * 1024 * 1024) {
 
                 @Override
                 protected void entryRemoved(boolean evicted, String key, Bitmap oldValue, Bitmap newValue) {
-
                     //加入二级缓存
-                    Log.e("---", "oldb  " + oldValue);
-                    Log.e("---", "key  " + key);
                     addSecondCache(oldValue);
+                }
+
+                @Override
+                protected int sizeOf(String key, Bitmap value) {
+                    final int bitmapSize = getBitmapSize(value) / 1024;
+                    return bitmapSize == 0 ? 1 : bitmapSize;
                 }
             };
         }
+    }
+
+    @TargetApi(Build.VERSION_CODES.KITKAT)
+    public static int getBitmapSize(Bitmap bitmap) {
+
+        // From KitKat onward use getAllocationByteCount() as allocated bytes can potentially be
+        // larger than bitmap byte count.
+        if (Utils.hasKitKat()) {
+            return bitmap.getAllocationByteCount();
+        }
+
+        if (Utils.hasHoneycombMR1()) {
+            return bitmap.getByteCount();
+        }
+
+        // Pre HC-MR1
+        return bitmap.getRowBytes() * bitmap.getHeight();
     }
 
     private Bitmap getMemoryCache(String url) {
@@ -199,17 +207,10 @@ public class CacheUtils {
      * Des 存储位置
      */
     public File getDiskCacheDir() {
-        // Check if media is mounted or storage is built-in, if so, try and use external cache dir
-        // otherwise use internal cache dir
-        final String cachePath =
-                Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState()) ||
-                        !isExternalStorageRemovable() ? getExternalCacheDir(MyApp.getIns()).getPath() :
-                        MyApp.getIns().getCacheDir().getPath();
 
         File file = new File(Environment.getExternalStorageDirectory() + "/imageCache");
         if (!file.exists()) file.mkdirs();
         return file;
-//        return new File(cachePath + File.separator + "chen");
     }
 
     private void initDiskCache() {
@@ -267,38 +268,49 @@ public class CacheUtils {
     }
 
     public Bitmap getDiskCache(String url) {
-        Log.e("-----", "getDiskCache  ");
         initDiskCache();
         DiskLruCache.Snapshot snapshot = null;
         try {
             snapshot = diskLruCache.get(url);
 
             if (null == snapshot) {
-                Log.e("-----", "snapshot 为空  ");
                 return null;
             }
+
             //获得文件输入流 读取bitmap
             InputStream is = snapshot.getInputStream(0);
 
 
             BitmapFactory.Options options = new BitmapFactory.Options();
-
             //先解析图片信息，判断是否可以用复用二级缓存里的内存空间
             options.inJustDecodeBounds = true;
-            BitmapFactory.decodeStream(is, null, options);
-            addInBitmapOptions(options);
+            if (null != is) {
+                FileDescriptor fd = ((FileInputStream) is).getFD();
+                BitmapFactory.decodeFileDescriptor(fd, null, options);
+//                BitmapFactory.decodeStream(is,null,options);
 
-            Log.e("-----", "inBitmap是否为空  " + options.inBitmap);
+            }
+            if (Utils.hasHoneycomb()) {
+               addInBitmapOptions(options);
+            }
+
             // 真正的解析图片  如果 inBitmap 里有 对象 在 decodeStrieam 的时候就会去复用 而不用重新分配内存
             options.inJustDecodeBounds = false;
-            Bitmap bitmap = BitmapFactory.decodeStream(is, null, options);
-            //放入内存缓存
-            if (null != bitmap) {
-                Log.e("-----", "加入 secondCachePool  " );
-                secondCachePool.add(bitmap);
-                memoryCache.put(url, bitmap);
+
+            if (is != null) {
+                Log.e("-----", "从硬盘缓存获取 ----  复用 inbitmap ------ " + options.inBitmap);
+                FileDescriptor fd = ((FileInputStream) is).getFD();
+//                Bitmap bitmap = BitmapFactory.decodeFileDescriptor(fd, null, options);
+                Bitmap bitmap = BitmapFactory.decodeStream(is, null, options);
+
+                //放入内存缓存
+                if (null != bitmap) {
+                    Log.e("-----", "放入 内存缓存");
+                    memoryCache.put(url, bitmap);
+                }
+                return bitmap;
+
             }
-            return bitmap;
         } catch (IOException e) {
             e.printStackTrace();
         } finally {
@@ -322,25 +334,29 @@ public class CacheUtils {
         // inBitmap only works with mutable bitmaps so force the decoder to
         // return mutable bitmaps.
         options.inMutable = true;
-        options.inSampleSize = 1;
 
 
         initSecondCacheIns();
-        Iterator<Bitmap> iterator = secondCachePool.iterator();
+        Iterator<WeakReference<Bitmap>> iterator = secondCachePool.iterator();
         synchronized (secondCachePool) {
 
+
             while (iterator.hasNext()) {
-                Bitmap bitmap = iterator.next();
-                if (null != bitmap) {
-                    Log.e("----"," isMutable");
+                Bitmap bitmap = iterator.next().get();
+
+
+                if (null != bitmap && bitmap.isMutable()) {
+
+                    //options 里面的宽高是要解码的图片  而 bitmap 对象里面的是被复用的图片 在 4.4 版本需要宽高一致 所以需要对比
+                    options.inSampleSize = calculateInSampleSize(options,bitmap.getWidth(),bitmap.getHeight());
+
                     if (canUseForInBitmap(bitmap, options)) {
-                        //内存可以复用 所以将 bitmap 赋值到 inBitmap
-                        Log.e("----"," 二级缓存赋值到 inbitmap 前  二级缓存大小 "+secondCachePool.size());
-                        options.inBitmap = bitmap;
-                        Log.e("----"," 二级缓存赋值到 inbitmap 后  二级缓存大小 "+secondCachePool.size());
+                        options.inBitmap = bitmap ;
                         //然后从 容器中移除
-//                        iterator.remove();
+                        iterator.remove();
                     }
+                } else {
+                    iterator.remove();
                 }
             }
         }
@@ -355,11 +371,8 @@ public class CacheUtils {
      * Des 判断 是否能用 inBitmap 属性
      */
     @TargetApi(Build.VERSION_CODES.KITKAT)
-    private boolean canUseForInBitmap(
-            Bitmap candidate, BitmapFactory.Options targetOptions) {
-        //BEGIN_INCLUDE(can_use_for_inbitmap)
+    private boolean canUseForInBitmap(Bitmap candidate, BitmapFactory.Options targetOptions) {
 
-        // TODO: 2018/6/21  计算出 inSampleSize
 
         if (!Utils.hasKitKat()) {
             // On earlier versions, the dimensions must match exactly and the inSampleSize must be 1
@@ -367,6 +380,8 @@ public class CacheUtils {
                     && candidate.getHeight() == targetOptions.outHeight
                     && targetOptions.inSampleSize == 1;
         }
+
+
 
         // From Android 4.4 (KitKat) onward we can re-use if the byte size of the new bitmap
         // is smaller than the reusable bitmap candidate allocation byte count.
@@ -381,6 +396,7 @@ public class CacheUtils {
      * Time 2018/6/21 16:36
      * Des 判断 图片编码格式
      */
+
     private static int getBytesPerPixel(Bitmap.Config config) {
         if (config == Bitmap.Config.ARGB_8888) {
             return 4;
@@ -401,11 +417,14 @@ public class CacheUtils {
      */
     public Bitmap getFromNet(String url) {
 
-        Bitmap bitmap = BitmapFactory.decodeResource(MyApp.getIns().getResources(), R.mipmap.banner);
+        String path = "/storage/emulated/0/imagedir/" + url + ".png";
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inMutable = true;
+        options.inSampleSize = 1;
+        Bitmap bitmap = BitmapFactory.decodeFile(path, options);
 
         if (null != bitmap) {
 
-            Log.e("-----", "从网络获取");
             CacheUtils.getIns().putToMemoryCache(url, bitmap);
             CacheUtils.getIns().putToDiskCache(url, bitmap);
             return bitmap;
@@ -413,4 +432,47 @@ public class CacheUtils {
 
         return null;
     }
+
+
+
+    public static int calculateInSampleSize(BitmapFactory.Options options,
+                                            int reqWidth, int reqHeight) {
+        // BEGIN_INCLUDE (calculate_sample_size)
+        // Raw height and width of image
+        final int height = options.outHeight;
+        final int width = options.outWidth;
+        int inSampleSize = 1;
+
+        if (height > reqHeight || width > reqWidth) {
+
+            final int halfHeight = height / 2;
+            final int halfWidth = width / 2;
+
+            // Calculate the largest inSampleSize value that is a power of 2 and keeps both
+            // height and width larger than the requested height and width.
+            while ((halfHeight / inSampleSize) > reqHeight
+                    && (halfWidth / inSampleSize) > reqWidth) {
+                inSampleSize *= 2;
+            }
+
+            // This offers some additional logic in case the image has a strange
+            // aspect ratio. For example, a panorama may have a much larger
+            // width than height. In these cases the total pixels might still
+            // end up being too large to fit comfortably in memory, so we should
+            // be more aggressive with sample down the image (=larger inSampleSize).
+
+            /*long totalPixels = width * height / inSampleSize;
+
+            // Anything more than 2x the requested pixels we'll sample down further
+            final long totalReqPixelsCap = reqWidth * reqHeight * 2;
+
+            while (totalPixels > totalReqPixelsCap) {
+                inSampleSize *= 2;
+                totalPixels /= 2;
+            }*/
+        }
+        return inSampleSize;
+        // END_INCLUDE (calculate_sample_size)
+    }
+
 }
