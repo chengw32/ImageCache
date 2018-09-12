@@ -4,8 +4,10 @@
 
 
 Bitmap 内存缓存 二级缓存 硬盘缓存 等运用
-
 学习 demo 
+
+
+具体效果：
 
 没做缓存时效果
  ![image](https://mmbiz.qpic.cn/mmbiz_png/QkmfBPL2OQgaEn6TYiasBIKYaiakYmkOuoPUIiawsfUJUL9ZYp4EqKzazWf1HBToZn3VseYicia6nfZWuk4laVLU4fg/640?wx_fmt=png&tp=webp&wxfrom=5&wx_lazy=1&wx_co=1)
