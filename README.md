@@ -1,5 +1,7 @@
 # ImageCache
 
+[代码讲解点击我直达帖子](https://mp.weixin.qq.com/s/GMy0xMcxJ_o0Yh0e_eaSIQ)
+
 
 Bitmap 内存缓存 二级缓存 硬盘缓存 等运用
 
@@ -14,4 +16,4 @@ Bitmap 内存缓存 二级缓存 硬盘缓存 等运用
 
 
 
-[代码讲解点击我直达帖子](https://mp.weixin.qq.com/s/GMy0xMcxJ_o0Yh0e_eaSIQ)
+
